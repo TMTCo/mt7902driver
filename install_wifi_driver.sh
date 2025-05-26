@@ -6,8 +6,11 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# Determine script's own directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Function to display progress
-function display_progress {
+display_progress() {
   echo -ne "$1...\r"
 }
 
@@ -17,16 +20,10 @@ apt-get update -qq
 apt-get install -y ndiswrapper-utils-1.9 wget unzip >/dev/null
 echo "Updating and installing necessary packages... Done."
 
-# Create temporary directory for downloading driver files
-TEMP_DIR="/tmp/wifi_drivers"
-echo "Creating temporary directory: $TEMP_DIR"
-mkdir -p $TEMP_DIR
-cd $TEMP_DIR
-
-# GitHub repository URL
+# GitHub repository URL (raw files)
 REPO_URL="https://github.com/Nevergiveup11837/mt7902driverforlinux/raw/main"
 
-# List of files to download
+# List of files we need
 FILES=(
   "mtkihvx.dll"
   "mtkwl1.dat"
@@ -47,26 +44,30 @@ FILES=(
   "WIFI_RAM_CODE_MT7922_1.bin"
 )
 
-# Download driver files from GitHub
-echo "Downloading driver files from GitHub..."
+echo "Checking for driver files in $SCRIPT_DIR..."
 for FILE in "${FILES[@]}"; do
-  display_progress "Downloading $FILE"
-  wget -q "$REPO_URL/$FILE"
-  if [ $? -ne 0 ]; then
-    echo "Failed to download $FILE. Exiting."
-    exit 1
+  if [ -f "$SCRIPT_DIR/$FILE" ]; then
+    echo "  ✓ $FILE found locally."
+  else
+    display_progress "Downloading $FILE"
+    wget -q "$REPO_URL/$FILE" -O "$SCRIPT_DIR/$FILE"
+    if [ $? -ne 0 ]; then
+      echo -e "\nFailed to download $FILE. Exiting."
+      exit 1
+    fi
+    echo "  ↓ $FILE downloaded."
   fi
 done
-echo "Downloading driver files from GitHub... Done."
+echo "All driver files are in place."
 
 # Install driver using NDISWrapper
-display_progress "Installing driver using NDISWrapper"
-ndiswrapper -i mtkwl6ex.inf >/dev/null 2>&1
+display_progress "Installing driver with NDISWrapper"
+ndiswrapper -i "$SCRIPT_DIR/mtkwl6ex.inf" >/dev/null 2>&1
 if [ $? -ne 0 ]; then
-  echo "Failed to install driver with NDISWrapper. Exiting."
+  echo -e "\nFailed to install driver with NDISWrapper. Exiting."
   exit 1
 fi
-echo "Installing driver using NDISWrapper... Done."
+echo "Installing driver with NDISWrapper... Done."
 
 # Verify driver installation
 display_progress "Verifying driver installation"
@@ -80,23 +81,16 @@ echo "Loading NDISWrapper module... Done."
 
 # Copy firmware files to the system firmware directory
 FIRMWARE_DIR="/lib/firmware"
-display_progress "Copying firmware files to $FIRMWARE_DIR"
-cp WIFI_MT7902_patch_mcu_1_1_hdr.bin $FIRMWARE_DIR/
-cp WIFI_MT7922_patch_mcu_1_1_hdr.bin $FIRMWARE_DIR/
-cp WIFI_RAM_CODE_MT7902_1.bin $FIRMWARE_DIR/
-cp WIFI_RAM_CODE_MT7922_1.bin $FIRMWARE_DIR/
-echo "Copying firmware files to $FIRMWARE_DIR... Done."
+echo "Copying firmware files to $FIRMWARE_DIR"
+for FIRM in WIFI_MT7902_patch_mcu_1_1_hdr.bin WIFI_MT7922_patch_mcu_1_1_hdr.bin WIFI_RAM_CODE_MT7902_1.bin WIFI_RAM_CODE_MT7922_1.bin; do
+  cp "$SCRIPT_DIR/$FIRM" "$FIRMWARE_DIR/"
+done
+echo "Copying firmware files... Done."
 
 # Add NDISWrapper to module startup
 display_progress "Adding NDISWrapper to module startup"
 ndiswrapper -m >/dev/null 2>&1
 update-initramfs -u >/dev/null 2>&1
 echo "Adding NDISWrapper to module startup... Done."
-
-# Clean up temporary directory
-display_progress "Cleaning up temporary directory"
-cd ~
-rm -rf $TEMP_DIR
-echo "Cleaning up temporary directory... Done."
 
 echo "Driver installation complete. Please reboot your computer to finalize the configuration."
